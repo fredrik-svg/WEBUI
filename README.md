@@ -17,6 +17,15 @@ Första gången behöver du hämta en modell (t.ex. en liten som fungerar bra p�
 docker exec -it ollama ollama pull llama3.2:1b
 ```
 
+### Anslut från en annan dator i nätverket
+
+1. Se till att Raspberry Pi och datorn du vill ansluta ifrån är på samma lokala nätverk (t.ex. samma wifi/router).
+2. På din Pi: kör `hostname -I` eller `ip addr` för att se Pi:ns IP-adress.
+3. Öppna adressen i en webbläsare på din dator, t.ex. `http://<pi-ip>:8000`.
+4. Om du kör via Docker används port 8000 automatiskt. På bare-metal styrs porten av variabeln `APP_PORT` i `.env`.
+
+> **Tips:** WebUI:t visar en ruta "Anslut från en annan dator" med klickbara länkar när servern är igång. Dela en av dessa adresser med användare i samma nätverk.
+
 > **Tips:** `llama3.2:1b` och `qwen2:0.5b-instruct` är små och brukar fungera på Pi, även med mindre RAM. Du kan byta modell i WebUI eller i `.env`.
 
 ### Installera Docker & Compose på Raspberry Pi

@@ -1,3 +1,60 @@
+function buildAddressUrl(address, port, protocol) {
+  const proto = (protocol || 'http').replace(/:$/, '');
+  const numericPort = Number(port);
+  const hasValidPort = Number.isFinite(numericPort) && numericPort > 0;
+  const isHttps = proto === 'https';
+  const needsPort = hasValidPort && !(
+    (isHttps && numericPort === 443) || (!isHttps && numericPort === 80)
+  );
+  const host = address.includes(':') && !address.startsWith('[') ? `[${address}]` : address;
+  const portPart = needsPort ? `:${numericPort}` : '';
+  return `${proto}://${host}${portPart}`;
+}
+
+async function fetchAppInfo() {
+  const textEl = document.getElementById('connectText');
+  const listEl = document.getElementById('connectList');
+  if (!textEl || !listEl) return;
+
+  textEl.textContent = 'Hämtar adressinformation…';
+  listEl.innerHTML = '';
+
+  try {
+    const res = await fetch('/api/info');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const addresses = Array.isArray(data.addresses) ? data.addresses : [];
+    let port = data.port;
+    if (port === undefined || port === null) {
+      port = window.location.port ? Number(window.location.port) : undefined;
+    }
+    if (!Number.isFinite(Number(port)) || Number(port) <= 0) {
+      port = 8000;
+    }
+    const proto = window.location.protocol === 'https:' ? 'https' : 'http';
+
+    if (addresses.length === 0) {
+      textEl.textContent = 'Hittade inga IP-adresser automatiskt. Kör `hostname -I` på servern för att se adressen.';
+      return;
+    }
+
+    textEl.textContent = 'Öppna någon av följande adresser i webbläsaren på en annan dator i samma nätverk:';
+    for (const addr of addresses) {
+      const li = document.createElement('li');
+      const url = buildAddressUrl(addr, port, proto);
+      const link = document.createElement('a');
+      link.href = url;
+      link.textContent = url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      li.appendChild(link);
+      listEl.appendChild(li);
+    }
+  } catch (e) {
+    textEl.textContent = 'Kunde inte hämta anslutningsinfo. Kontrollera att servern kör och försök igen.';
+  }
+}
+
 async function fetchModels() {
   const sel = document.getElementById('model');
   sel.innerHTML = '';
@@ -83,6 +140,7 @@ document.getElementById('refreshModels').addEventListener('click', fetchModels);
 
 document.getElementById('endpoint').textContent = (window.location.origin + '/api').replace('/api','/');
 fetchModels();
+fetchAppInfo();
 
 
 // --- Whisper inspelning ---

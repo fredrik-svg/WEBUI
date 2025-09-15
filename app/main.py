@@ -1,5 +1,6 @@
 import os
 import json
+import socket
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,6 +24,51 @@ from faster_whisper import WhisperModel
 WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "tiny")
 WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
 _whisper_model = None
+
+
+def _add_address(value, ipv4, ipv6):
+    if not value:
+        return
+    value = value.split('%')[0]  # ta bort ev. interface-suffix från IPv6
+    if value in {"0.0.0.0", "::", "::1"}:
+        return
+    if value.startswith("127."):
+        return
+    if ":" in value:
+        ipv6.add(value)
+    else:
+        ipv4.add(value)
+
+
+def get_network_addresses():
+    ipv4 = set()
+    ipv6 = set()
+
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None):
+            addr = info[4][0]
+            _add_address(addr, ipv4, ipv6)
+    except OSError:
+        pass
+
+    for target in (("1.1.1.1", 80), ("8.8.8.8", 80)):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(target)
+                _add_address(s.getsockname()[0], ipv4, ipv6)
+        except OSError:
+            continue
+
+    try:
+        with socket.socket(socket.AF_INET6, socket.SOCK_DGRAM) as s:
+            s.connect(("2001:4860:4860::8888", 80))
+            _add_address(s.getsockname()[0], ipv4, ipv6)
+    except OSError:
+        pass
+
+    return sorted(ipv4) + sorted(ipv6)
+
 
 def get_whisper_model():
     global _whisper_model
@@ -65,6 +111,17 @@ async def home(request: Request):
         "request": request,
         "default_model": DEFAULT_MODEL
     })
+
+
+@app.get("/api/info")
+async def app_info():
+    return {
+        "host": APP_HOST,
+        "port": APP_PORT,
+        "default_model": DEFAULT_MODEL,
+        "ollama_host": OLLAMA_HOST,
+        "addresses": get_network_addresses()
+    }
 
 @app.get("/api/models")
 async def list_models():

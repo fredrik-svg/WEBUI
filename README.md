@@ -4,7 +4,7 @@ En superlätt WebUI för att köra Ollama på Raspberry Pi (ARM64). UI:t är på
 
 ## Snabbstart (Docker Compose – rekommenderas)
 
-1. **Installera Docker & Compose** på din Raspberry Pi (64‑bitars OS).
+1. **Installera Docker & Compose** på din Raspberry Pi (64‑bitars OS, se instruktionerna nedan).
 2. Klona detta repo och kör:
    ```bash
    docker compose up -d --build
@@ -18,6 +18,36 @@ docker exec -it ollama ollama pull llama3.2:1b-instruct
 ```
 
 > **Tips:** `llama3.2:1b-instruct` och `qwen2:0.5b-instruct` är små och brukar fungera på Pi, även med mindre RAM. Du kan byta modell i WebUI eller i `.env`.
+
+### Installera Docker & Compose på Raspberry Pi
+
+Följ stegen nedan på din Raspberry Pi (64-bitars Raspberry Pi OS eller Debian-baserad distribution):
+
+```bash
+# 1) Uppdatera paketindex
+sudo apt-get update
+
+# 2) Installera Docker via officiella skriptet
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+
+# 3) Lägg till ditt användarkonto i docker-gruppen (så slipper du sudo)
+sudo usermod -aG docker $USER
+
+# 4) Aktivera nya gruppen utan att starta om (alt. logga ut/in)
+newgrp docker
+
+# 5) Installera Docker Compose-pluginet
+sudo apt-get install -y docker-compose-plugin
+
+# 6) Kontrollera att allt fungerar
+docker --version
+docker compose version
+```
+
+> **Behörigheter:** `usermod -aG docker $USER` ser till att ditt konto har rättigheter att prata med Docker-daemonen. Om du hoppar över detta måste du prefixa kommandon med `sudo`.
+
+> **Tips:** På äldre system kan paketet heta `docker-compose`. Då kan du installera det via `sudo apt-get install -y docker-compose`.
 
 ## Alternativ: Bare‑metal (utan Docker)
 

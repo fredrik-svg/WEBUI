@@ -1,0 +1,8 @@
+{
+  "title": "Raspi Ollama WebUI",
+  "model": "Modell",
+  "refresh_models": "Uppdatera modeller",
+  "placeholder": "Skriv på svenska…",
+  "send": "Skicka",
+  "temperature": "Temperatur"
+}

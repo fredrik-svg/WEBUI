@@ -4,6 +4,12 @@ header { padding: 12px 16px; background: #f4f4f5; border-bottom: 1px solid #e5e7
 header h1 { margin: 0; font-size: 1.1rem; }
 .row { display: flex; gap: 8px; align-items: center; }
 main { max-width: 920px; margin: 0 auto; padding: 16px; }
+#connect { margin-bottom: 16px; padding: 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; }
+#connect h2 { margin-top: 0; font-size: 1.05rem; }
+#connect ul { margin: 8px 0 0 18px; padding: 0; }
+#connect li { margin-bottom: 6px; }
+#connect a { color: #2563eb; text-decoration: none; }
+#connect a:hover { text-decoration: underline; }
 #history { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }
 .msg { padding: 12px 14px; border-radius: 12px; border: 1px solid #e5e7eb; }
 .msg.user { background: #eef2ff; }

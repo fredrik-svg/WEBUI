@@ -7,7 +7,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     espeak-ng \
-    libespeak-ng1 \\
+    libespeak-ng1 \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 

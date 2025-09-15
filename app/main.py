@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
-DEFAULT_MODEL = os.getenv("LLM_MODEL", "llama3.2:1b-instruct")
+DEFAULT_MODEL = os.getenv("LLM_MODEL", "llama3.2:1b")
 APP_HOST = os.getenv("APP_HOST", "0.0.0.0")
 APP_PORT = int(os.getenv("APP_PORT", "8000"))
 

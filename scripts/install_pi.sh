@@ -27,6 +27,6 @@ if [ ! -f .env ]; then
 fi
 
 echo "Tips: Hämta en liten modell först (går snabbare och funkar på Pi):"
-echo "  ollama pull llama3.2:1b-instruct"
+echo "  ollama pull llama3.2:1b"
 echo
 echo "Starta appen med: python -m app.main"

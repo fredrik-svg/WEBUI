@@ -14,10 +14,10 @@ En superlätt WebUI för att köra Ollama på Raspberry Pi (ARM64). UI:t är på
 Första gången behöver du hämta en modell (t.ex. en liten som fungerar bra på Pi):
 
 ```bash
-docker exec -it ollama ollama pull llama3.2:1b-instruct
+docker exec -it ollama ollama pull llama3.2:1b
 ```
 
-> **Tips:** `llama3.2:1b-instruct` och `qwen2:0.5b-instruct` är små och brukar fungera på Pi, även med mindre RAM. Du kan byta modell i WebUI eller i `.env`.
+> **Tips:** `llama3.2:1b` och `qwen2:0.5b-instruct` är små och brukar fungera på Pi, även med mindre RAM. Du kan byta modell i WebUI eller i `.env`.
 
 ### Installera Docker & Compose på Raspberry Pi
 
@@ -61,7 +61,7 @@ python -m app.main
 ## Svenska stöd
 
 - WebUI är lokaliserad till svenska (texter i `i18n/sv.json`).
-- För bästa svenska resultat: använd en modern flerspråkig modell (t.ex. `llama3.2:1b-instruct`). Modellen kan väljas i UI:t.
+- För bästa svenska resultat: använd en modern flerspråkig modell (t.ex. `llama3.2:1b`). Modellen kan väljas i UI:t.
 - Vill du lägga till talsyntes/ASR? Se kommentarerna i `app/main.py` för hur du kan lägga till Whisper och TTS senare.
 
 ## Miljövariabler
@@ -70,14 +70,14 @@ Skapa en `.env` (eller använd `.env.example`):
 
 ```
 OLLAMA_HOST=http://ollama:11434
-LLM_MODEL=llama3.2:1b-instruct
+LLM_MODEL=llama3.2:1b
 APP_HOST=0.0.0.0
 APP_PORT=8000
 ```
 
 ## Endpoints (enkelt REST‑API)
 
-- `POST /api/chat` – Skicka `{ "messages": [{ "role":"user", "content":"Hej!" }], "model":"llama3.2:1b-instruct" }`
+- `POST /api/chat` – Skicka `{ "messages": [{ "role":"user", "content":"Hej!" }], "model":"llama3.2:1b" }`
 - `GET /api/models` – Lista lokalt installerade modeller via Ollama
 - `GET /` – WebUI (HTML/JS)
 
@@ -133,7 +133,7 @@ cd raspi-ollama-webui
 
 # 4) (Om Docker) starta allt
 docker compose up -d --build
-docker exec -it ollama ollama pull llama3.2:1b-instruct
+docker exec -it ollama ollama pull llama3.2:1b
 
 # 5) Öppna i webbläsare (på din dator): http://<pi-ip>:8000
 ```

@@ -8,7 +8,7 @@ async function fetchModels() {
     if (models.length === 0) {
       // visa standard
       const opt = document.createElement('option');
-      opt.value = window.DEFAULT_MODEL || 'llama3.2:1b-instruct';
+      opt.value = window.DEFAULT_MODEL || 'llama3.2:1b';
       opt.textContent = opt.value + ' (ej installerad än)';
       sel.appendChild(opt);
     } else {
@@ -21,7 +21,7 @@ async function fetchModels() {
     }
   } catch (e) {
     const opt = document.createElement('option');
-    opt.value = window.DEFAULT_MODEL || 'llama3.2:1b-instruct';
+    opt.value = window.DEFAULT_MODEL || 'llama3.2:1b';
     opt.textContent = opt.value + ' (endpoint otillgänglig)';
     sel.appendChild(opt);
   }
@@ -39,7 +39,7 @@ function addMsg(role, text) {
 async function sendPrompt() {
   const ta = document.getElementById('prompt');
   const temperature = parseFloat(document.getElementById('temperature').value);
-  const model = document.getElementById('model').value || window.DEFAULT_MODEL || 'llama3.2:1b-instruct';
+  const model = document.getElementById('model').value || window.DEFAULT_MODEL || 'llama3.2:1b';
   const userText = ta.value.trim();
   if (!userText) return;
   addMsg('user', userText);

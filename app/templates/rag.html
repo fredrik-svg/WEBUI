@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kunskapsbas (RAG) – Raspi Ollama WebUI</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header class="page-header">
+      <div class="header-copy">
+        <h1>Kunskapsbas (RAG)</h1>
+        <p>Hantera dokument som används som kontext när RAG är aktiverat i chatten.</p>
+      </div>
+      <a class="back-link" href="/">← Tillbaka till chatten</a>
+    </header>
+
+    <main class="rag-page">
+      <section class="rag-section" id="ragOverview">
+        <h2>Översikt</h2>
+        <p>Embeddings-modell: <code id="ragModelName">{{ embedding_model }}</code></p>
+        <p id="ragSummaryText">Hämtar statistik…</p>
+      </section>
+
+      <section class="rag-section">
+        <h2>Lägg till text manuellt</h2>
+        <textarea id="ragTextInput" rows="5" placeholder="Klistra in eller skriv text…"></textarea>
+        <div class="row wrap rag-controls">
+          <button id="addTextBtn" type="button">Lägg till text</button>
+        </div>
+      </section>
+
+      <section class="rag-section">
+        <h2>Importera webbsida</h2>
+        <div class="row wrap rag-url-form">
+          <input type="url" id="ragUrlInput" placeholder="https://exempel.se/artikel" />
+          <button id="addUrlBtn" type="button">Hämta och lägg till</button>
+        </div>
+        <p class="field-help">Sidan hämtas server-side och bara texten sparas. Maximalt {{ MAX_IMPORTED_CHARS }} tecken används.</p>
+      </section>
+
+      <section class="rag-section">
+        <h2>Ladda upp PDF</h2>
+        <form id="ragPdfForm" class="row wrap rag-pdf-form">
+          <input type="file" id="ragPdfInput" accept="application/pdf" />
+          <button type="submit">Lägg till PDF</button>
+        </form>
+        <p class="field-help">Stöd för PDF-filer upp till 8&nbsp;MB. De första 40 sidorna används.</p>
+      </section>
+
+      <section class="rag-section">
+        <div class="section-header">
+          <h2>Dokument i kunskapsbasen</h2>
+          <button id="clearRag" type="button">Töm hela kunskapsbasen</button>
+        </div>
+        <p id="ragStatus" class="rag-status"></p>
+        <ul id="ragList" class="rag-list"></ul>
+      </section>
+    </main>
+
+    <footer>
+      <small>Ollama endpoint: <code id="endpoint"></code></small>
+    </footer>
+
+    <script>
+      window.RAG_MAX_CHARS = {{ MAX_IMPORTED_CHARS }};
+    </script>
+    <script src="/static/rag.js"></script>
+  </body>
+</html>

@@ -1,8 +1,9 @@
+import io
 import os
 import json
 import socket
-from typing import List
-from fastapi import FastAPI, Request, HTTPException
+from typing import List, Optional, Tuple
+from fastapi import FastAPI, Request, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -10,6 +11,10 @@ import httpx
 from dotenv import load_dotenv
 
 from .rag_store import RAGResult, RAGStore
+
+from urllib.parse import urlparse
+from bs4 import BeautifulSoup
+from pypdf import PdfReader
 
 load_dotenv()
 
@@ -21,9 +26,54 @@ EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
 DEFAULT_RAG_PATH = os.path.join(os.path.expanduser("~"), ".ollama_webui_rag.json")
 RAG_STORE_PATH = os.path.abspath(os.path.expanduser(os.getenv("RAG_STORE_PATH", DEFAULT_RAG_PATH)))
 
+MAX_IMPORTED_CHARS = 40_000
+MAX_PDF_BYTES = 8 * 1024 * 1024  # 8 MB
+MAX_PDF_PAGES = 40
+
 app = FastAPI(title="Raspi Ollama WebUI (sv)")
 rag_store = RAGStore(OLLAMA_HOST, EMBED_MODEL, RAG_STORE_PATH)
-from fastapi import UploadFile, File
+
+
+def _normalize_document_text(text: str, limit: int = MAX_IMPORTED_CHARS) -> Tuple[str, bool]:
+    cleaned = (text or "").strip()
+    truncated = False
+    if len(cleaned) > limit:
+        cleaned = cleaned[:limit]
+        truncated = True
+    return cleaned, truncated
+
+
+def _html_to_text_and_title(html: str) -> Tuple[str, Optional[str]]:
+    soup = BeautifulSoup(html, "html.parser")
+    title: Optional[str] = None
+    if soup.title and isinstance(soup.title.string, str):
+        title = soup.title.string.strip()
+    for tag in soup(["script", "style", "noscript", "template"]):
+        tag.decompose()
+    if soup.head:
+        soup.head.decompose()
+    text = soup.get_text(separator="\n")
+    lines = [line.strip() for line in text.splitlines()]
+    clean = "\n".join(line for line in lines if line)
+    return clean, title
+
+
+def _extract_pdf_text(data: bytes, max_pages: int = MAX_PDF_PAGES) -> Tuple[str, int, int]:
+    reader = PdfReader(io.BytesIO(data))
+    total_pages = len(reader.pages)
+    use_pages = min(total_pages, max_pages)
+    parts: List[str] = []
+    for idx in range(use_pages):
+        page = reader.pages[idx]
+        try:
+            page_text = page.extract_text() or ""
+        except Exception:
+            page_text = ""
+        page_text = page_text.strip()
+        if page_text:
+            parts.append(page_text)
+    combined = "\n\n".join(parts).strip()
+    return combined, total_pages, use_pages
 import tempfile
 from pydub import AudioSegment
 from faster_whisper import WhisperModel
@@ -120,6 +170,15 @@ async def home(request: Request):
     })
 
 
+@app.get("/rag", response_class=HTMLResponse)
+async def rag_page(request: Request):
+    return templates.TemplateResponse("rag.html", {
+        "request": request,
+        "embedding_model": EMBED_MODEL,
+        "MAX_IMPORTED_CHARS": MAX_IMPORTED_CHARS,
+    })
+
+
 @app.get("/api/info")
 async def app_info():
     return {
@@ -160,9 +219,106 @@ async def list_rag_documents():
 
 @app.post("/api/rag/docs")
 async def add_rag_document(payload: dict):
-    text = payload.get("text", "")
+    original = (payload.get("text") or "")
+    normalized, truncated = _normalize_document_text(original)
+    metadata = {"type": "text", "original_characters": len(original.strip())}
+    if truncated:
+        metadata["truncated"] = True
     try:
-        document = await rag_store.add_document(text)
+        document = await rag_store.add_document(normalized, metadata=metadata)
+        return {"document": document}
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except RuntimeError as re:
+        raise HTTPException(status_code=502, detail=str(re))
+
+
+@app.post("/api/rag/docs/url")
+async def add_rag_document_from_url(payload: dict):
+    raw_url = str(payload.get("url") or "").strip()
+    if not raw_url:
+        raise HTTPException(status_code=400, detail="Ange en URL att hämta.")
+
+    parsed = urlparse(raw_url)
+    if not parsed.scheme:
+        raw_url = f"https://{raw_url}"
+        parsed = urlparse(raw_url)
+    if not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Ogiltig URL. Ange en fullständig adress.")
+
+    try:
+        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+            response = await client.get(raw_url, headers={"User-Agent": "Ollama-WebUI/1.0"})
+            response.raise_for_status()
+    except httpx.HTTPStatusError as exc:  # type: ignore[no-untyped-def]
+        status_code = exc.response.status_code if exc.response else 500
+        if 400 <= status_code < 500:
+            raise HTTPException(status_code=400, detail=f"Sidan svarade med HTTP {status_code}. Kontrollera adressen.") from exc
+        raise HTTPException(status_code=502, detail=f"Kunde inte hämta sidan (HTTP {status_code}).") from exc
+    except httpx.HTTPError as exc:  # type: ignore[no-untyped-def]
+        raise HTTPException(status_code=502, detail=f"Kunde inte hämta sidan: {exc}") from exc
+
+    content_type = response.headers.get("content-type", "").lower()
+    if "html" not in content_type and "text" not in content_type:
+        raise HTTPException(status_code=400, detail="URL:en verkar inte innehålla någon läsbar text.")
+
+    text, title = _html_to_text_and_title(response.text)
+    normalized, truncated = _normalize_document_text(text)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Kunde inte läsa någon text från sidan.")
+
+    metadata = {
+        "type": "url",
+        "url": raw_url,
+        "original_characters": len(text),
+    }
+    if title:
+        metadata["title"] = title
+    if truncated:
+        metadata["truncated"] = True
+
+    try:
+        document = await rag_store.add_document(normalized, metadata=metadata)
+        return {"document": document}
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except RuntimeError as re:
+        raise HTTPException(status_code=502, detail=str(re))
+
+
+@app.post("/api/rag/docs/pdf")
+async def add_rag_document_from_pdf(file: UploadFile = File(...)):
+    filename = file.filename or "uppladdad.pdf"
+    if not filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Endast PDF-filer stöds.")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Filen är tom.")
+    if len(data) > MAX_PDF_BYTES:
+        raise HTTPException(status_code=400, detail="PDF-filen är för stor. Max 8 MB stöds.")
+
+    try:
+        text, total_pages, used_pages = _extract_pdf_text(data)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Kunde inte läsa PDF-filen: {exc}") from exc
+
+    normalized, truncated = _normalize_document_text(text)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Kunde inte hitta någon text i PDF-filen.")
+
+    metadata = {
+        "type": "pdf",
+        "filename": filename,
+        "total_pages": total_pages,
+        "pages_used": used_pages,
+        "original_characters": len(text),
+    }
+    if truncated:
+        metadata["truncated"] = True
+
+    try:
+        document = await rag_store.add_document(normalized, metadata=metadata)
         return {"document": document}
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))

@@ -97,6 +97,70 @@ class RAGStore:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+    async def embedding_status(self) -> Dict[str, Any]:
+        """Return information about whether the embedding model is available."""
+        url = f"{self.ollama_host}/api/tags"
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+        except httpx.HTTPStatusError as exc:  # type: ignore[no-untyped-def]
+            status_code = exc.response.status_code if exc.response else None
+            detail_text = exc.response.text.strip() if exc.response else ""
+            message = "Kunde inte kontrollera embeddings-modellen."
+            if status_code is not None:
+                message += f" Ollama svarade med HTTP {status_code}."
+            if detail_text:
+                message += f" {detail_text}"
+            return {
+                "model": self.embed_model,
+                "available": False,
+                "message": message.strip(),
+            }
+        except httpx.HTTPError as exc:  # type: ignore[no-untyped-def]
+            return {
+                "model": self.embed_model,
+                "available": False,
+                "message": f"Kunde inte nå Ollama för att kontrollera embeddings-modellen: {exc}",
+            }
+
+        try:
+            data = response.json()
+        except json.JSONDecodeError:
+            return {
+                "model": self.embed_model,
+                "available": False,
+                "message": "Kunde inte tolka svaret från Ollama när embeddings-modellen kontrollerades.",
+            }
+
+        target_names = {self.embed_model}
+        if ":" not in self.embed_model:
+            target_names.add(f"{self.embed_model}:latest")
+
+        installed = False
+        if isinstance(data, dict):
+            models = data.get("models")
+            if isinstance(models, list):
+                for item in models:
+                    if isinstance(item, dict):
+                        name = item.get("name")
+                        if isinstance(name, str) and name in target_names:
+                            installed = True
+                            break
+
+        if installed:
+            return {"model": self.embed_model, "available": True}
+
+        return {
+            "model": self.embed_model,
+            "available": False,
+            "message": (
+                "Embeddings-modellen "
+                f"'{self.embed_model}' verkar inte vara installerad i Ollama. Kör 'ollama pull "
+                f"{self.embed_model}' på servern och försök igen."
+            ),
+        }
+
     async def stats(self) -> Dict[str, int]:
         async with self._lock:
             chunk_count = sum(len(doc.get("chunks") or []) for doc in self.documents)

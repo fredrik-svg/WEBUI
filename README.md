@@ -122,6 +122,13 @@ Projektet har inbyggt stöd för **Whisper (ASR)** via `faster-whisper`. I webUI
 ### Bare-metal
 Installationsscriptet installerar `ffmpeg`. Se `.env.example` för konfig.
 
+## Text till tal (TTS)
+
+- WebUI:t låter dig välja TTS-lösning direkt i chatten (dropdown bredvid "Läs upp svar").
+- **Whisper** syftar här på eSpeak NG:s viskande röstvariant.
+- **eSpeak NG + MBROLA** använder MBROLA-röster (t.ex. `mb-sv1`) om de finns installerade.
+- Saknas MBROLA-röster visas alternativet som otillgängligt tills du installerat dem.
+
 ## GitHub-repo
 
 1. Skapa ett nytt repo på GitHub (t.ex. `raspi-ollama-webui`).

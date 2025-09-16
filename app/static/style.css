@@ -22,6 +22,9 @@ main { max-width: 920px; margin: 0 auto; padding: 16px; }
 .msg { padding: 12px 14px; border-radius: 12px; border: 1px solid #e5e7eb; }
 .msg.user { background: #eef2ff; }
 .msg.assistant { background: #f1f5f9; }
+.msg.notice { background: #fff7ed; border-color: #fb923c; color: #9a3412; }
+#composer .tts-select { gap: 6px; }
+#composer .tts-select select { min-width: 180px; }
 #composer { position: sticky; bottom: 0; background: white; border-top: 1px solid #e5e7eb; padding: 12px 0; }
 #prompt { width: 100%; font-size: 1rem; padding: 10px; border-radius: 8px; border: 1px solid #e5e7eb; }
 button { padding: 8px 12px; border-radius: 10px; border: 1px solid #d1d5db; background: #ffffff; cursor: pointer; }

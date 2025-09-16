@@ -14,7 +14,8 @@ function buildAddressUrl(address, port, protocol) {
 const STORAGE_KEYS = {
   model: 'ollama-webui:selected-model',
   ragEnabled: 'ollama-webui:rag-enabled',
-  ragTopK: 'ollama-webui:rag-top-k'
+  ragTopK: 'ollama-webui:rag-top-k',
+  ttsEngine: 'ollama-webui:tts-engine'
 };
 
 function getStoredItem(key) {
@@ -328,6 +329,7 @@ renderRagResults([]);
 fetchModels();
 fetchAppInfo();
 fetchRagSummary();
+fetchTtsOptions();
 
 
 // --- Whisper inspelning ---
@@ -386,11 +388,101 @@ micBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startRecordin
 micBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopRecording(); });
 
 
-// --- TTS (browser först, server fallback) ---
+let lastAssistantText = '';
+let lastTtsAudio = null;
+
+function appendNotice(text) {
+  const wrap = document.getElementById('history');
+  if (!wrap) return;
+  const div = document.createElement('div');
+  div.className = 'msg notice';
+  div.textContent = text;
+  wrap.appendChild(div);
+  div.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+
+function clearLastTtsAudio() {
+  if (lastTtsAudio?.url) {
+    URL.revokeObjectURL(lastTtsAudio.url);
+  }
+  lastTtsAudio = null;
+}
+
+function getSelectedTtsEngine() {
+  const select = document.getElementById('ttsEngine');
+  if (!select) return 'browser';
+  return select.value || 'browser';
+}
+
+function populateTtsSelect(options, preferred) {
+  const select = document.getElementById('ttsEngine');
+  if (!select) return;
+
+  const stored = getStoredItem(STORAGE_KEYS.ttsEngine);
+  const desired = stored || preferred || 'browser';
+
+  const merged = [
+    { id: 'browser', label: 'Webbläsare (inbyggd)', available: true },
+    ...(Array.isArray(options) ? options : [])
+  ];
+
+  select.innerHTML = '';
+  let chosen = null;
+
+  for (const opt of merged) {
+    if (!opt || !opt.id) continue;
+    const optionEl = document.createElement('option');
+    optionEl.value = opt.id;
+    const available = opt.available !== false;
+    optionEl.textContent = available ? opt.label : `${opt.label} (ej tillgänglig)`;
+    if (!available) optionEl.disabled = true;
+    select.appendChild(optionEl);
+    if (available && opt.id === desired) {
+      chosen = opt.id;
+    }
+  }
+
+  if (!chosen) {
+    const preferredOpt = merged.find(opt => opt && opt.id === preferred && opt.available !== false);
+    if (preferredOpt) chosen = preferredOpt.id;
+  }
+
+  if (!chosen) {
+    const firstAvailable = merged.find(opt => opt && opt.available !== false);
+    if (firstAvailable) chosen = firstAvailable.id;
+  }
+
+  if (!chosen) chosen = 'browser';
+
+  select.value = chosen;
+  setStoredItem(STORAGE_KEYS.ttsEngine, chosen);
+  if (chosen === 'browser') {
+    clearLastTtsAudio();
+  }
+}
+
+async function fetchTtsOptions() {
+  const select = document.getElementById('ttsEngine');
+  if (!select) return;
+  try {
+    const res = await fetch('/api/tts/options');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const options = Array.isArray(data?.options) ? data.options : [];
+    const preferred = data?.default_engine || 'espeak_mbrola';
+    populateTtsSelect(options, preferred);
+  } catch (e) {
+    console.warn('Kunde inte hämta TTS-alternativ', e);
+    populateTtsSelect([
+      { id: 'whisper', label: 'Whisper (eSpeak NG)', available: true },
+      { id: 'espeak_mbrola', label: 'eSpeak NG + MBROLA', available: true }
+    ], 'espeak_mbrola');
+  }
+}
+
 function speakBrowser(text) {
   if (!('speechSynthesis' in window)) return false;
   const utter = new SpeechSynthesisUtterance(text);
-  // välj svensk röst om möjligt
   const voices = speechSynthesis.getVoices();
   const sv = voices.find(v => (v.lang && v.lang.toLowerCase().startsWith('sv')) || /swedish|svenska/i.test(v.name));
   if (sv) utter.voice = sv;
@@ -399,27 +491,95 @@ function speakBrowser(text) {
   return true;
 }
 
-async function downloadServerTTS(text) {
+async function fetchServerTtsAudio(text, engine) {
+  const payload = { text, rate: 180, voice: 'sv', engine };
+  const res = await fetch('/api/tts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    let detail = 'HTTP ' + res.status;
+    try {
+      const data = await res.json();
+      if (data?.detail) detail = data.detail;
+    } catch (ignore) {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+  return res.blob();
+}
+
+function setLastTtsAudio(blob, text, engine) {
+  clearLastTtsAudio();
+  const url = URL.createObjectURL(blob);
+  lastTtsAudio = { blob, url, text, engine };
+  return lastTtsAudio;
+}
+
+function triggerDownload(url, filename) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+async function speakAssistantText(text) {
+  const engine = getSelectedTtsEngine();
+  if (engine === 'browser') {
+    if (!speakBrowser(text)) {
+      appendNotice('Webbläsaren saknar inbyggd talsyntes. Välj en serverröst för ljud.');
+    }
+    return;
+  }
   try {
-    const res = await fetch('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, rate: 180, voice: 'sv' }) });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'svar_sv.wav';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    const blob = await fetchServerTtsAudio(text, engine);
+    const audio = setLastTtsAudio(blob, text, engine);
+    const player = new Audio(audio.url);
+    player.play().catch(() => {
+      appendNotice('Kunde inte spela upp ljud automatiskt. Använd knappen “Ladda ner ljud”.');
+    });
   } catch (e) {
-    addMsg('assistant', 'Kunde inte skapa ljudfil: ' + e.message);
+    appendNotice('Kunde inte skapa ljud: ' + e.message);
   }
 }
 
-let lastAssistantText = '';
+async function downloadLatestTts() {
+  if (!lastAssistantText) {
+    appendNotice('Inget svar att läsa upp ännu.');
+    return;
+  }
+  const engine = getSelectedTtsEngine();
+  if (engine === 'browser') {
+    appendNotice('Välj en serverröst (Whisper eller eSpeak NG + MBROLA) för att ladda ned ljud.');
+    return;
+  }
+  try {
+    let audio = lastTtsAudio;
+    if (!audio || audio.text !== lastAssistantText || audio.engine !== engine) {
+      const blob = await fetchServerTtsAudio(lastAssistantText, engine);
+      audio = setLastTtsAudio(blob, lastAssistantText, engine);
+    }
+    triggerDownload(audio.url, `svar_${engine}.wav`);
+  } catch (e) {
+    appendNotice('Kunde inte skapa ljudfil: ' + e.message);
+  }
+}
 
-// Hooka in i addMsg för att spara/säga upp svar
+const ttsSelect = document.getElementById('ttsEngine');
+if (ttsSelect) {
+  ttsSelect.addEventListener('change', () => {
+    const value = ttsSelect.value || 'browser';
+    setStoredItem(STORAGE_KEYS.ttsEngine, value);
+    if (value === 'browser') {
+      clearLastTtsAudio();
+    }
+  });
+}
+
 const _origAddMsg = addMsg;
 addMsg = function(role, text) {
   _origAddMsg(role, text);
@@ -427,18 +587,16 @@ addMsg = function(role, text) {
     lastAssistantText = text;
     const doTts = document.getElementById('ttsToggle')?.checked;
     if (doTts) {
-      if (!speakBrowser(text)) {
-        // Om webbläsaren saknar TTS, försök servern & spela upp i sidan
-        downloadServerTTS(text);
-      }
+      void speakAssistantText(text);
+    } else {
+      clearLastTtsAudio();
     }
   }
 };
 
-document.getElementById('dlTts').addEventListener('click', () => {
-  if (!lastAssistantText) {
-    addMsg('assistant', 'Inget svar att läsa upp ännu.');
-    return;
-  }
-  downloadServerTTS(lastAssistantText);
-});
+const downloadBtn = document.getElementById('dlTts');
+if (downloadBtn) {
+  downloadBtn.addEventListener('click', () => { void downloadLatestTts(); });
+}
+
+window.addEventListener('beforeunload', clearLastTtsAudio);

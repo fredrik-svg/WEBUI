@@ -2,19 +2,25 @@ import io
 import os
 import json
 import socket
+import tempfile
+from functools import lru_cache
 from typing import List, Optional, Tuple
+
+import httpx
+import pyttsx3
+from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException, UploadFile, File
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-import httpx
-from dotenv import load_dotenv
+from pydub import AudioSegment
+from pypdf import PdfReader
+from faster_whisper import WhisperModel
 
 from .rag_store import RAGResult, RAGStore
 
 from urllib.parse import urlparse
-from bs4 import BeautifulSoup
-from pypdf import PdfReader
 
 load_dotenv()
 
@@ -74,9 +80,6 @@ def _extract_pdf_text(data: bytes, max_pages: int = MAX_PDF_PAGES) -> Tuple[str,
             parts.append(page_text)
     combined = "\n\n".join(parts).strip()
     return combined, total_pages, use_pages
-import tempfile
-from pydub import AudioSegment
-from faster_whisper import WhisperModel
 
 WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "tiny")
 WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
@@ -427,23 +430,170 @@ async def chat(payload: dict):
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("app.main:app", host=APP_HOST, port=APP_PORT, reload=False)
 
-from fastapi.responses import FileResponse
-import pyttsx3
-import tempfile
+
+def _safe_int(value: Optional[str], fallback: int) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return fallback
+
+
+DEFAULT_TTS_ENGINE = (os.getenv("TTS_ENGINE", "espeak_mbrola") or "espeak_mbrola").strip().lower()
+DEFAULT_TTS_RATE = _safe_int(os.getenv("TTS_RATE", "180"), 180)
+DEFAULT_TTS_VOICE_HINT = os.getenv("TTS_VOICE_HINT", "sv") or "sv"
+
+
+@lru_cache(maxsize=1)
+def _pyttsx3_voice_catalog() -> List[dict]:
+    """Hämtar och cachar tillgängliga röster från pyttsx3."""
+
+    voices: List[dict] = []
+    engine = pyttsx3.init()
+    try:
+        for voice in engine.getProperty("voices"):
+            languages: List[str] = []
+            raw_languages = getattr(voice, "languages", None)
+            if raw_languages:
+                try:
+                    for lang in raw_languages:
+                        if isinstance(lang, bytes):
+                            languages.append(lang.decode("utf-8", "ignore"))
+                        else:
+                            languages.append(str(lang))
+                except TypeError:
+                    pass
+            haystack_parts = [voice.id or "", voice.name or "", *languages]
+            voices.append(
+                {
+                    "id": voice.id,
+                    "name": voice.name or "",
+                    "languages": languages,
+                    "haystack": " ".join(part.lower() for part in haystack_parts if part),
+                }
+            )
+    finally:
+        try:
+            engine.stop()
+        except Exception:
+            pass
+    return voices
+
+
+def _match_voice(predicate) -> Optional[str]:
+    for voice in _pyttsx3_voice_catalog():
+        if predicate(voice):
+            return voice["id"]
+    return None
+
+
+def _select_voice_id(engine_choice: str, voice_pref: Optional[str], voice_id: Optional[str]) -> Optional[str]:
+    voices = _pyttsx3_voice_catalog()
+    if voice_id and any(v["id"] == voice_id for v in voices):
+        return voice_id
+
+    def haystack_contains(voice: dict, *needles: str) -> bool:
+        return all(needle in voice.get("haystack", "") for needle in needles if needle)
+
+    if voice_pref:
+        pref = voice_pref.lower()
+        matched = _match_voice(lambda v: haystack_contains(v, pref))
+        if matched:
+            return matched
+
+    normalized_choice = (engine_choice or "").lower().strip()
+
+    if normalized_choice == "whisper":
+        matched = _match_voice(lambda v: haystack_contains(v, "whisper"))
+        if matched:
+            return matched
+    elif normalized_choice in {"espeak_mbrola", "mbrola", "espeak-mbrola"}:
+        matched = _match_voice(lambda v: haystack_contains(v, "mb", "sv"))
+        if matched:
+            return matched
+        matched = _match_voice(lambda v: haystack_contains(v, "mb"))
+        if matched:
+            return matched
+    elif normalized_choice:
+        matched = _match_voice(lambda v: haystack_contains(v, normalized_choice))
+        if matched:
+            return matched
+
+    if voice_pref:
+        matched = _match_voice(lambda v: haystack_contains(v, voice_pref.lower()))
+        if matched:
+            return matched
+
+    matched = _match_voice(lambda v: haystack_contains(v, "sv"))
+    if matched:
+        return matched
+
+    matched = _match_voice(lambda v: haystack_contains(v, "swedish"))
+    if matched:
+        return matched
+
+    return voices[0]["id"] if voices else None
+
+
+def _available_tts_options() -> List[dict]:
+    voices = _pyttsx3_voice_catalog()
+
+    def list_ids(predicate) -> List[str]:
+        return [voice["id"] for voice in voices if predicate(voice)]
+
+    whisper_ids = list_ids(lambda v: "whisper" in v.get("haystack", ""))
+    mbrola_ids = list_ids(lambda v: "mb" in v.get("haystack", ""))
+    swedish_mbrola_ids = list_ids(lambda v: "mb" in v.get("haystack", "") and ("sv" in v.get("haystack", "") or "swedish" in v.get("haystack", "")))
+
+    return [
+        {
+            "id": "whisper",
+            "label": "Whisper (eSpeak NG)",
+            "available": bool(whisper_ids),
+            "voices": whisper_ids,
+            "description": "Använder eSpeak NG:s viskande röst.",
+        },
+        {
+            "id": "espeak_mbrola",
+            "label": "eSpeak NG + MBROLA",
+            "available": bool(mbrola_ids),
+            "voices": mbrola_ids,
+            "swedish_voices": swedish_mbrola_ids,
+            "description": "Kräver MBROLA-röster (t.ex. mb-sv1) installerade i eSpeak NG.",
+        },
+    ]
+
+
+@app.get("/api/tts/options")
+async def tts_options():
+    voices = _pyttsx3_voice_catalog()
+    fallback_voice = _select_voice_id(DEFAULT_TTS_ENGINE, DEFAULT_TTS_VOICE_HINT, None)
+    return {
+        "default_engine": DEFAULT_TTS_ENGINE,
+        "options": _available_tts_options(),
+        "fallback_voice": fallback_voice,
+        "total_voices": len(voices),
+    }
+
 
 @app.post("/api/tts")
 async def tts(payload: dict):
-    """
-    Text -> WAV (offline TTS via pyttsx3/espeak-ng)
-    payload: { "text": "...", "rate": 180, "voice": "sv" }
-    """
-    text = payload.get("text", "").strip()
+    """Text -> WAV (offline TTS via pyttsx3/eSpeak NG)."""
+
+    text = (payload.get("text") or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="Saknar text att läsa upp.")
-    rate = int(payload.get("rate", 180))
-    voice_pref = payload.get("voice")  # e.g., "sv" or full id
+
+    try:
+        rate = int(payload.get("rate") or DEFAULT_TTS_RATE)
+    except (TypeError, ValueError):
+        rate = DEFAULT_TTS_RATE
+
+    engine_choice = (payload.get("engine") or DEFAULT_TTS_ENGINE).strip().lower()
+    voice_pref = (payload.get("voice") or DEFAULT_TTS_VOICE_HINT or "").strip()
+    voice_id = payload.get("voice_id")
 
     try:
         with tempfile.TemporaryDirectory() as td:
@@ -451,24 +601,24 @@ async def tts(payload: dict):
             engine = pyttsx3.init()
             try:
                 engine.setProperty("rate", rate)
-                # välj svensk röst om möjligt
-                if voice_pref:
-                    for v in engine.getProperty("voices"):
-                        if voice_pref.lower() in (v.id.lower() + " " + (v.name or "").lower()):
-                            engine.setProperty("voice", v.id)
-                            break
-                else:
-                    # auto: leta efter sv-SE/svenska
-                    for v in engine.getProperty("voices"):
-                        name = (v.name or "").lower()
-                        vid = v.id.lower()
-                        if "sv" in vid or "swedish" in name or "svenska" in name:
-                            engine.setProperty("voice", v.id)
-                            break
             except Exception:
                 pass
+
+            selected_voice = _select_voice_id(engine_choice, voice_pref or None, voice_id)
+            if selected_voice:
+                try:
+                    engine.setProperty("voice", selected_voice)
+                except Exception:
+                    pass
+
             engine.save_to_file(text, out_wav)
             engine.runAndWait()
+
+            if not os.path.exists(out_wav):
+                raise RuntimeError("Ingen ljudfil genererades av talsyntesen.")
+
             return FileResponse(out_wav, media_type="audio/wav", filename="tts_sv.wav")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"TTS misslyckades: {e}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"TTS misslyckades: {exc}") from exc

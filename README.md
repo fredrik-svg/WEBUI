@@ -73,6 +73,15 @@ python -m app.main
 - För bästa svenska resultat: använd en modern flerspråkig modell (t.ex. `llama3.2:1b`). Modellen kan väljas i UI:t.
 - Vill du lägga till talsyntes/ASR? Se kommentarerna i `app/main.py` för hur du kan lägga till Whisper och TTS senare.
 
+## Kunskapsbas (RAG)
+
+- I WebUI finns en sektion "Kunskapsbas (RAG)" där du kan klistra in egna texter/anteckningar.
+- Texten delas upp i utdrag och indexeras med Ollamas embeddings-API (`/api/embeddings`).
+- Aktivera kryssrutan **Använd kunskapsbas (RAG)** i chat-kompositören för att injicera utdragen i prompten.
+- Du kan välja hur många utdrag som ska hämtas (1–10) och se vilka utdrag som användes i svaret.
+- Embeddings lagras som standard i `~/.ollama_webui_rag.json`. Ändra via `RAG_STORE_PATH` vid behov.
+- Säkerställ att du har en embeddings-modell installerad i Ollama (t.ex. `ollama pull nomic-embed-text`).
+
 ## Miljövariabler
 
 Skapa en `.env` (eller använd `.env.example`):
@@ -82,6 +91,9 @@ OLLAMA_HOST=http://ollama:11434
 LLM_MODEL=llama3.2:1b
 APP_HOST=0.0.0.0
 APP_PORT=8000
+EMBED_MODEL=nomic-embed-text
+# valfritt, ändra var kunskapsbasen sparas
+# RAG_STORE_PATH=/path/to/rag_store.json
 ```
 
 ## Endpoints (enkelt REST‑API)

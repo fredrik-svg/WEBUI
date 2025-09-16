@@ -1,6 +1,7 @@
 import os
 import json
 import socket
+from typing import List
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -8,14 +9,20 @@ from fastapi.templating import Jinja2Templates
 import httpx
 from dotenv import load_dotenv
 
+from .rag_store import RAGResult, RAGStore
+
 load_dotenv()
 
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
 DEFAULT_MODEL = os.getenv("LLM_MODEL", "llama3.2:1b")
 APP_HOST = os.getenv("APP_HOST", "0.0.0.0")
 APP_PORT = int(os.getenv("APP_PORT", "8000"))
+EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
+DEFAULT_RAG_PATH = os.path.join(os.path.expanduser("~"), ".ollama_webui_rag.json")
+RAG_STORE_PATH = os.path.abspath(os.path.expanduser(os.getenv("RAG_STORE_PATH", DEFAULT_RAG_PATH)))
 
 app = FastAPI(title="Raspi Ollama WebUI (sv)")
+rag_store = RAGStore(OLLAMA_HOST, EMBED_MODEL, RAG_STORE_PATH)
 from fastapi import UploadFile, File
 import tempfile
 from pydub import AudioSegment
@@ -120,6 +127,7 @@ async def app_info():
         "port": APP_PORT,
         "default_model": DEFAULT_MODEL,
         "ollama_host": OLLAMA_HOST,
+        "embedding_model": EMBED_MODEL,
         "addresses": get_network_addresses()
     }
 
@@ -138,9 +146,47 @@ async def list_models():
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Kunde inte hämta modeller: {e}")
 
+
+@app.get("/api/rag/docs")
+async def list_rag_documents():
+    docs = await rag_store.list_documents()
+    stats = await rag_store.stats()
+    return {
+        "documents": docs,
+        "stats": stats,
+        "embedding_model": EMBED_MODEL,
+    }
+
+
+@app.post("/api/rag/docs")
+async def add_rag_document(payload: dict):
+    text = payload.get("text", "")
+    try:
+        document = await rag_store.add_document(text)
+        return {"document": document}
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except RuntimeError as re:
+        raise HTTPException(status_code=502, detail=str(re))
+
+
+@app.delete("/api/rag/docs/{doc_id}")
+async def delete_rag_document(doc_id: str):
+    removed = await rag_store.delete_document(doc_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Dokumentet hittades inte.")
+    stats = await rag_store.stats()
+    return {"removed": True, "stats": stats}
+
+
+@app.delete("/api/rag/docs")
+async def clear_rag_documents():
+    await rag_store.clear()
+    return {"cleared": True}
+
 @app.post("/api/chat")
 async def chat(payload: dict):
-    # payload: { messages: [...], model?: str, options?: {...} }
+    # payload: { messages: [...], model?: str, options?: {...}, use_rag?: bool, rag_top_k?: int }
     messages = payload.get("messages", [])
     model = payload.get("model") or DEFAULT_MODEL
     options = payload.get("options", {})
@@ -148,12 +194,53 @@ async def chat(payload: dict):
     if not isinstance(messages, list) or not messages:
         raise HTTPException(status_code=400, detail="Skicka 'messages' som en icke-tom lista.")
 
-    # Ollama format
+    use_rag = bool(payload.get("use_rag"))
+    rag_top_k_raw = payload.get("rag_top_k", 3)
+    try:
+        rag_top_k = int(rag_top_k_raw)
+    except (TypeError, ValueError):
+        rag_top_k = 3
+    rag_top_k = max(1, min(rag_top_k, 10))
+
+    enriched_messages = list(messages)
+    rag_matches: List[RAGResult] = []
+
+    if use_rag:
+        user_prompt = ""
+        for msg in reversed(enriched_messages):
+            if isinstance(msg, dict) and msg.get("role") == "user":
+                user_prompt = str(msg.get("content", "")).strip()
+                if user_prompt:
+                    break
+        if user_prompt:
+            try:
+                rag_matches = await rag_store.search(user_prompt, top_k=rag_top_k)
+            except RuntimeError as err:
+                raise HTTPException(status_code=502, detail=str(err))
+            if rag_matches:
+                context_intro = (
+                    "Använd följande utdrag från kunskapsbasen när du svarar. "
+                    "Om informationen inte räcker ska du säga att du saknar underlag."
+                )
+                context_body = "\n\n".join(
+                    f"Utdrag {idx + 1}:\n{match.text}"
+                    for idx, match in enumerate(rag_matches)
+                )
+                context_message = {
+                    "role": "system",
+                    "content": f"{context_intro}\n\n{context_body}",
+                }
+                if enriched_messages and isinstance(enriched_messages[0], dict) and enriched_messages[0].get("role") == "system":
+                    insert_at = 1
+                else:
+                    insert_at = 0
+                enriched_messages.insert(insert_at, context_message)
+
     body = {
         "model": model,
-        "messages": messages,
+        "messages": enriched_messages,
         "stream": False,
-        "options": options
+        "options": options,
     }
     url = f"{OLLAMA_HOST}/api/chat"
     try:
@@ -161,6 +248,17 @@ async def chat(payload: dict):
             r = await client.post(url, json=body)
             r.raise_for_status()
             data = r.json()
+            if isinstance(data, dict):
+                data["rag_context"] = [
+                    {
+                        "doc_id": match.doc_id,
+                        "chunk_index": match.chunk_index,
+                        "score": match.score,
+                        "text": match.text,
+                    }
+                    for match in rag_matches
+                ] if use_rag else []
+                data["rag_used"] = use_rag and bool(rag_matches)
             return JSONResponse(data)
     except httpx.HTTPStatusError as se:
         # Vid typiska fel: modell saknas, minne etc.

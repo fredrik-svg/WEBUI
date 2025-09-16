@@ -22,17 +22,37 @@
         <p id="connectText">Samlar adressinformation…</p>
         <ul id="connectList"></ul>
       </section>
+      <section id="rag">
+        <h2>Kunskapsbas (RAG)</h2>
+        <p>Lägg till egen fakta som modellen kan använda när RAG är aktiverat.</p>
+        <textarea id="ragInput" rows="4" placeholder="Klistra in anteckningar eller dokumentutdrag…"></textarea>
+        <div class="row wrap rag-controls">
+          <button id="addRag">Lägg till text</button>
+          <button id="clearRag">Töm kunskapsbasen</button>
+          <span class="rag-meta">Embeddings-modell: <code id="ragModelName">–</code></span>
+        </div>
+        <p id="ragStatus" class="rag-status"></p>
+        <ul id="ragList" class="rag-list"></ul>
+      </section>
       <section id="chat">
         <div id="history" aria-live="polite"></div>
+        <div id="ragResults" class="rag-results" hidden>
+          <h3>Kontext från kunskapsbasen</h3>
+          <ol></ol>
+        </div>
         <div id="composer">
           <textarea id="prompt" rows="3" placeholder="Skriv på svenska…"></textarea>
-          <div class="row">
+          <div class="row wrap">
             <label for="temperature">Temperatur</label>
             <input type="range" min="0" max="2" step="0.1" id="temperature" value="0.7">
             <button id="micBtn" title="Spela in (håll för att prata)">🎤</button>
             <button id="send">Skicka</button>
             <label class="row" style="gap:6px;"><input type="checkbox" id="ttsToggle" checked> Läs upp svar</label>
             <button id="dlTts" title="Ladda ner ljud av senaste svar">🔊 Ladda ner ljud</button>
+          </div>
+          <div class="row wrap fine-controls">
+            <label class="row rag-toggle"><input type="checkbox" id="ragToggle"> Använd kunskapsbas (RAG)</label>
+            <label class="row rag-topk" for="ragTopK">Antal utdrag <input type="number" id="ragTopK" min="1" max="10" value="3"></label>
           </div>
         </div>
       </section>

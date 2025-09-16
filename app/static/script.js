@@ -11,6 +11,30 @@ function buildAddressUrl(address, port, protocol) {
   return `${proto}://${host}${portPart}`;
 }
 
+const STORAGE_KEYS = {
+  model: 'ollama-webui:selected-model',
+  ragEnabled: 'ollama-webui:rag-enabled',
+  ragTopK: 'ollama-webui:rag-top-k'
+};
+
+function getStoredItem(key) {
+  try {
+    return window.localStorage ? window.localStorage.getItem(key) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function setStoredItem(key, value) {
+  try {
+    if (window.localStorage) {
+      window.localStorage.setItem(key, value);
+    }
+  } catch (e) {
+    /* ignore */
+  }
+}
+
 async function fetchAppInfo() {
   const textEl = document.getElementById('connectText');
   const listEl = document.getElementById('connectList');
@@ -62,26 +86,227 @@ async function fetchModels() {
     const res = await fetch('/api/models');
     const data = await res.json();
     const models = data.models || [];
+    const preferred = getStoredItem(STORAGE_KEYS.model) || window.DEFAULT_MODEL || 'llama3.2:1b';
+    const available = new Set();
     if (models.length === 0) {
-      // visa standard
       const opt = document.createElement('option');
-      opt.value = window.DEFAULT_MODEL || 'llama3.2:1b';
-      opt.textContent = opt.value + ' (ej installerad än)';
+      opt.value = preferred;
+      opt.textContent = preferred + ' (ej installerad än)';
       sel.appendChild(opt);
+      available.add(opt.value);
     } else {
       for (const m of models) {
         const opt = document.createElement('option');
         opt.value = m;
         opt.textContent = m;
         sel.appendChild(opt);
+        available.add(m);
       }
     }
+    if (!available.has(preferred)) {
+      const opt = document.createElement('option');
+      opt.value = preferred;
+      opt.textContent = preferred + ' (standard)';
+      sel.appendChild(opt);
+    }
+    sel.value = preferred;
   } catch (e) {
     const opt = document.createElement('option');
     opt.value = window.DEFAULT_MODEL || 'llama3.2:1b';
     opt.textContent = opt.value + ' (endpoint otillgänglig)';
     sel.appendChild(opt);
+    sel.value = opt.value;
   }
+}
+
+function setRagStatus(message, type = 'info') {
+  const el = document.getElementById('ragStatus');
+  if (!el) return;
+  el.textContent = message || '';
+  el.classList.remove('error', 'success');
+  if (type === 'error') el.classList.add('error');
+  if (type === 'success') el.classList.add('success');
+}
+
+function renderRagDocs(payload) {
+  const docs = Array.isArray(payload?.documents) ? payload.documents : [];
+  const stats = payload?.stats || {};
+  const chunkCount = Number(stats.chunk_count) || 0;
+  const listEl = document.getElementById('ragList');
+  const toggleEl = document.getElementById('ragToggle');
+  const modelEl = document.getElementById('ragModelName');
+
+  if (modelEl && payload && payload.embedding_model) {
+    modelEl.textContent = payload.embedding_model;
+  }
+
+  if (listEl) {
+    listEl.innerHTML = '';
+    for (const doc of docs) {
+      const li = document.createElement('li');
+      const preview = document.createElement('div');
+      preview.className = 'preview';
+      preview.textContent = doc.preview || '[Tom text]';
+      li.appendChild(preview);
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      const chunkInfo = document.createElement('span');
+      const chunkLabel = (doc.chunks === 1) ? 'utdrag' : 'utdrag';
+      chunkInfo.textContent = `${doc.chunks || 0} ${chunkLabel}`;
+      meta.appendChild(chunkInfo);
+      if (doc.created_at) {
+        const created = new Date(doc.created_at);
+        if (!Number.isNaN(created.valueOf())) {
+          const dateSpan = document.createElement('span');
+          dateSpan.textContent = created.toLocaleString('sv-SE');
+          meta.appendChild(dateSpan);
+        }
+      }
+      li.appendChild(meta);
+
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.textContent = 'Ta bort';
+      removeBtn.addEventListener('click', () => deleteRagDoc(doc.id));
+      li.appendChild(removeBtn);
+
+      listEl.appendChild(li);
+    }
+  }
+
+  if (toggleEl) {
+    if (docs.length === 0) {
+      toggleEl.checked = false;
+      toggleEl.disabled = true;
+      setStoredItem(STORAGE_KEYS.ragEnabled, '0');
+    } else {
+      toggleEl.disabled = false;
+      const stored = getStoredItem(STORAGE_KEYS.ragEnabled);
+      if (stored !== null) {
+        toggleEl.checked = stored === '1';
+      }
+    }
+  }
+
+  return { count: docs.length, chunkCount };
+}
+
+async function fetchRagDocs(statusOverride) {
+  const listEl = document.getElementById('ragList');
+  if (!listEl) return;
+  if (!statusOverride) {
+    setRagStatus('Hämtar kunskapsbas…');
+  }
+  try {
+    const res = await fetch('/api/rag/docs');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const summary = renderRagDocs(data);
+    if (statusOverride && statusOverride.text) {
+      setRagStatus(statusOverride.text, statusOverride.type || 'info');
+    } else if (summary.count === 0) {
+      setRagStatus('Ingen text har lagts till ännu.');
+    } else {
+      const chunkLabel = summary.chunkCount === 1 ? 'utdrag' : 'utdrag';
+      setRagStatus(`Texter: ${summary.count} • ${summary.chunkCount} ${chunkLabel}.`);
+    }
+  } catch (e) {
+    setRagStatus('Kunde inte hämta kunskapsbasen: ' + e.message, 'error');
+    listEl.innerHTML = '';
+    const toggleEl = document.getElementById('ragToggle');
+    if (toggleEl) {
+      toggleEl.checked = false;
+      toggleEl.disabled = true;
+    }
+  }
+}
+
+async function addRagDoc() {
+  const textarea = document.getElementById('ragInput');
+  if (!textarea) return;
+  const text = textarea.value.trim();
+  if (!text) {
+    setRagStatus('Skriv eller klistra in text först.', 'error');
+    return;
+  }
+  setRagStatus('Lägger till text…');
+  try {
+    const res = await fetch('/api/rag/docs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.detail || ('HTTP ' + res.status));
+    }
+    textarea.value = '';
+    await fetchRagDocs({ text: 'Texten lades till i kunskapsbasen.', type: 'success' });
+  } catch (e) {
+    setRagStatus('Kunde inte lägga till text: ' + e.message, 'error');
+  }
+}
+
+async function deleteRagDoc(id) {
+  if (!id) return;
+  try {
+    const res = await fetch(`/api/rag/docs/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.detail || ('HTTP ' + res.status));
+    }
+    await fetchRagDocs({ text: 'Texten togs bort.', type: 'success' });
+  } catch (e) {
+    setRagStatus('Kunde inte ta bort text: ' + e.message, 'error');
+  }
+}
+
+async function clearRagDocs() {
+  const listEl = document.getElementById('ragList');
+  if (!listEl) return;
+  if (!window.confirm('Är du säker på att du vill tömma kunskapsbasen?')) {
+    return;
+  }
+  try {
+    const res = await fetch('/api/rag/docs', { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.detail || ('HTTP ' + res.status));
+    }
+    await fetchRagDocs({ text: 'Kunskapsbasen tömdes.', type: 'success' });
+  } catch (e) {
+    setRagStatus('Kunde inte rensa kunskapsbasen: ' + e.message, 'error');
+  }
+}
+
+function renderRagResults(items) {
+  const wrap = document.getElementById('ragResults');
+  if (!wrap) return;
+  const list = wrap.querySelector('ol');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!Array.isArray(items) || items.length === 0) {
+    wrap.hidden = true;
+    return;
+  }
+  items.forEach((item, idx) => {
+    const li = document.createElement('li');
+    const header = document.createElement('strong');
+    let label = `Utdrag ${idx + 1}`;
+    if (typeof item.score === 'number' && !Number.isNaN(item.score)) {
+      const clamped = Math.max(-1, Math.min(1, item.score));
+      const percent = Math.round(clamped * 1000) / 10;
+      label += ` • likhet ${percent}%`;
+    }
+    header.textContent = label;
+    const content = document.createElement('div');
+    content.textContent = item.text || '';
+    li.appendChild(header);
+    li.appendChild(content);
+    list.appendChild(li);
+  });
+  wrap.hidden = false;
 }
 
 function addMsg(role, text) {
@@ -97,6 +322,17 @@ async function sendPrompt() {
   const ta = document.getElementById('prompt');
   const temperature = parseFloat(document.getElementById('temperature').value);
   const model = document.getElementById('model').value || window.DEFAULT_MODEL || 'llama3.2:1b';
+  const ragToggleEl = document.getElementById('ragToggle');
+  const ragTopKInput = document.getElementById('ragTopK');
+  let ragTopK = parseInt(ragTopKInput?.value || '3', 10);
+  if (!Number.isFinite(ragTopK) || ragTopK < 1) {
+    ragTopK = 3;
+  }
+  if (ragTopK > 10) ragTopK = 10;
+  if (ragTopKInput) {
+    ragTopKInput.value = String(ragTopK);
+  }
+  const useRag = !!(ragToggleEl && !ragToggleEl.disabled && ragToggleEl.checked);
   const userText = ta.value.trim();
   if (!userText) return;
   addMsg('user', userText);
@@ -111,10 +347,15 @@ async function sendPrompt() {
     ],
     options: { temperature }
   };
+  if (useRag) {
+    body.use_rag = true;
+    body.rag_top_k = ragTopK;
+  }
 
   const btn = document.getElementById('send');
   btn.disabled = true;
   btn.textContent = 'Tänker…';
+  renderRagResults([]);
   try {
     const res = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!res.ok) {
@@ -124,23 +365,78 @@ async function sendPrompt() {
     const data = await res.json();
     const text = data?.message?.content || '[Inget svar]';
     addMsg('assistant', text);
+    if (useRag || Array.isArray(data?.rag_context)) {
+      renderRagResults(data?.rag_context || []);
+    } else {
+      renderRagResults([]);
+    }
   } catch (e) {
     addMsg('assistant', 'Fel: ' + e.message + '\nTips: säkerställ att Ollama kör och att modellen är hämtad.');
+    renderRagResults([]);
   } finally {
     btn.disabled = false;
     btn.textContent = 'Skicka';
   }
 }
 
-document.getElementById('send').addEventListener('click', sendPrompt);
-document.getElementById('prompt').addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendPrompt();
-});
-document.getElementById('refreshModels').addEventListener('click', fetchModels);
+const sendBtn = document.getElementById('send');
+if (sendBtn) sendBtn.addEventListener('click', sendPrompt);
+
+const promptEl = document.getElementById('prompt');
+if (promptEl) {
+  promptEl.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendPrompt();
+  });
+}
+
+const refreshBtn = document.getElementById('refreshModels');
+if (refreshBtn) refreshBtn.addEventListener('click', fetchModels);
+
+const modelSelect = document.getElementById('model');
+if (modelSelect) {
+  modelSelect.addEventListener('change', (e) => {
+    setStoredItem(STORAGE_KEYS.model, e.target.value);
+  });
+}
+
+const ragToggleElInit = document.getElementById('ragToggle');
+if (ragToggleElInit) {
+  const stored = getStoredItem(STORAGE_KEYS.ragEnabled);
+  if (stored !== null) {
+    ragToggleElInit.checked = stored === '1';
+  }
+  ragToggleElInit.addEventListener('change', (e) => {
+    setStoredItem(STORAGE_KEYS.ragEnabled, e.target.checked ? '1' : '0');
+  });
+}
+
+const ragTopKInput = document.getElementById('ragTopK');
+if (ragTopKInput) {
+  const storedTopK = parseInt(getStoredItem(STORAGE_KEYS.ragTopK) || '', 10);
+  if (Number.isFinite(storedTopK) && storedTopK >= 1) {
+    const clamped = Math.min(10, storedTopK);
+    ragTopKInput.value = String(clamped);
+  }
+  ragTopKInput.addEventListener('change', () => {
+    let value = parseInt(ragTopKInput.value, 10);
+    if (!Number.isFinite(value) || value < 1) value = 3;
+    if (value > 10) value = 10;
+    ragTopKInput.value = String(value);
+    setStoredItem(STORAGE_KEYS.ragTopK, String(value));
+  });
+}
+
+const ragAddBtn = document.getElementById('addRag');
+if (ragAddBtn) ragAddBtn.addEventListener('click', addRagDoc);
+
+const ragClearBtn = document.getElementById('clearRag');
+if (ragClearBtn) ragClearBtn.addEventListener('click', clearRagDocs);
 
 document.getElementById('endpoint').textContent = (window.location.origin + '/api').replace('/api','/');
+renderRagResults([]);
 fetchModels();
 fetchAppInfo();
+fetchRagDocs();
 
 
 // --- Whisper inspelning ---

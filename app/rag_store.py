@@ -246,9 +246,38 @@ class RAGStore:
                 response = await client.post(url, json=payload)
                 response.raise_for_status()
         except httpx.HTTPStatusError as exc:  # type: ignore[no-untyped-def]
-            detail = exc.response.text
+            status_code = exc.response.status_code if exc.response else None
+            detail_text = exc.response.text if exc.response else ""
+            detail_json: Optional[Any] = None
+            if exc.response is not None:
+                try:
+                    detail_json = exc.response.json()
+                except json.JSONDecodeError:
+                    detail_json = None
+
+            if status_code == 404:
+                # Ollama svarar med 404 när modellen saknas lokalt.
+                message: str = ""
+                if isinstance(detail_json, dict):
+                    raw = detail_json.get("error") or detail_json.get("message")
+                    if isinstance(raw, str):
+                        message = raw
+                if not message and isinstance(detail_json, str):
+                    message = detail_json
+                if not message:
+                    message = detail_text
+                if message and "not found" in message.lower():
+                    raise RuntimeError(
+                        (
+                            f"Embeddings-modellen '{self.embed_model}' verkar inte vara "
+                            "installerad i Ollama. Kör 'ollama pull "
+                            f"{self.embed_model}' på servern och försök igen."
+                        )
+                    ) from exc
+
+            detail = detail_text or str(exc)
             raise RuntimeError(
-                f"Kunde inte generera embedding ({exc.response.status_code}): {detail}"
+                f"Kunde inte generera embedding ({status_code}): {detail}"
             ) from exc
         except httpx.HTTPError as exc:  # type: ignore[no-untyped-def]
             raise RuntimeError(f"Kunde inte nå Ollama för embedding: {exc}") from exc

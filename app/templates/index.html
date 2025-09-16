@@ -22,17 +22,10 @@
         <p id="connectText">Samlar adressinformation…</p>
         <ul id="connectList"></ul>
       </section>
-      <section id="rag">
+      <section id="ragSummary">
         <h2>Kunskapsbas (RAG)</h2>
-        <p>Lägg till egen fakta som modellen kan använda när RAG är aktiverat.</p>
-        <textarea id="ragInput" rows="4" placeholder="Klistra in anteckningar eller dokumentutdrag…"></textarea>
-        <div class="row wrap rag-controls">
-          <button id="addRag">Lägg till text</button>
-          <button id="clearRag">Töm kunskapsbasen</button>
-          <span class="rag-meta">Embeddings-modell: <code id="ragModelName">–</code></span>
-        </div>
-        <p id="ragStatus" class="rag-status"></p>
-        <ul id="ragList" class="rag-list"></ul>
+        <p>Hantera dokumenten på den <a href="/rag">dedikerade RAG-sidan</a>. När RAG är aktiverat i chatten används dokumenten som extra kontext.</p>
+        <p id="ragSummaryText" class="rag-status">Hämtar statistik…</p>
       </section>
       <section id="chat">
         <div id="history" aria-live="polite"></div>

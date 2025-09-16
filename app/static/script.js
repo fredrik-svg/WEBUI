@@ -119,59 +119,19 @@ async function fetchModels() {
   }
 }
 
-function setRagStatus(message, type = 'info') {
-  const el = document.getElementById('ragStatus');
-  if (!el) return;
-  el.textContent = message || '';
-  el.classList.remove('error', 'success');
-  if (type === 'error') el.classList.add('error');
-  if (type === 'success') el.classList.add('success');
-}
-
-function renderRagDocs(payload) {
+function renderRagSummary(payload) {
   const docs = Array.isArray(payload?.documents) ? payload.documents : [];
   const stats = payload?.stats || {};
   const chunkCount = Number(stats.chunk_count) || 0;
-  const listEl = document.getElementById('ragList');
   const toggleEl = document.getElementById('ragToggle');
-  const modelEl = document.getElementById('ragModelName');
+  const summaryEl = document.getElementById('ragSummaryText');
 
-  if (modelEl && payload && payload.embedding_model) {
-    modelEl.textContent = payload.embedding_model;
-  }
-
-  if (listEl) {
-    listEl.innerHTML = '';
-    for (const doc of docs) {
-      const li = document.createElement('li');
-      const preview = document.createElement('div');
-      preview.className = 'preview';
-      preview.textContent = doc.preview || '[Tom text]';
-      li.appendChild(preview);
-
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      const chunkInfo = document.createElement('span');
-      const chunkLabel = (doc.chunks === 1) ? 'utdrag' : 'utdrag';
-      chunkInfo.textContent = `${doc.chunks || 0} ${chunkLabel}`;
-      meta.appendChild(chunkInfo);
-      if (doc.created_at) {
-        const created = new Date(doc.created_at);
-        if (!Number.isNaN(created.valueOf())) {
-          const dateSpan = document.createElement('span');
-          dateSpan.textContent = created.toLocaleString('sv-SE');
-          meta.appendChild(dateSpan);
-        }
-      }
-      li.appendChild(meta);
-
-      const removeBtn = document.createElement('button');
-      removeBtn.type = 'button';
-      removeBtn.textContent = 'Ta bort';
-      removeBtn.addEventListener('click', () => deleteRagDoc(doc.id));
-      li.appendChild(removeBtn);
-
-      listEl.appendChild(li);
+  if (summaryEl) {
+    if (docs.length === 0) {
+      summaryEl.textContent = 'Ingen text har lagts till ännu.';
+    } else {
+      const chunkLabel = chunkCount === 1 ? 'utdrag' : 'utdrag';
+      summaryEl.textContent = `Texter: ${docs.length} • ${chunkCount} ${chunkLabel}.`;
     }
   }
 
@@ -192,91 +152,28 @@ function renderRagDocs(payload) {
   return { count: docs.length, chunkCount };
 }
 
-async function fetchRagDocs(statusOverride) {
-  const listEl = document.getElementById('ragList');
-  if (!listEl) return;
-  if (!statusOverride) {
-    setRagStatus('Hämtar kunskapsbas…');
+async function fetchRagSummary() {
+  const summaryEl = document.getElementById('ragSummaryText');
+  if (summaryEl) {
+    summaryEl.textContent = 'Hämtar statistik…';
   }
   try {
     const res = await fetch('/api/rag/docs');
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    const summary = renderRagDocs(data);
-    if (statusOverride && statusOverride.text) {
-      setRagStatus(statusOverride.text, statusOverride.type || 'info');
-    } else if (summary.count === 0) {
-      setRagStatus('Ingen text har lagts till ännu.');
-    } else {
-      const chunkLabel = summary.chunkCount === 1 ? 'utdrag' : 'utdrag';
-      setRagStatus(`Texter: ${summary.count} • ${summary.chunkCount} ${chunkLabel}.`);
+    const summary = renderRagSummary(data);
+    if (summary.count === 0 && summaryEl) {
+      summaryEl.textContent = 'Ingen text har lagts till ännu.';
     }
   } catch (e) {
-    setRagStatus('Kunde inte hämta kunskapsbasen: ' + e.message, 'error');
-    listEl.innerHTML = '';
+    if (summaryEl) {
+      summaryEl.textContent = 'Kunde inte hämta kunskapsbasen: ' + e.message;
+    }
     const toggleEl = document.getElementById('ragToggle');
     if (toggleEl) {
       toggleEl.checked = false;
       toggleEl.disabled = true;
     }
-  }
-}
-
-async function addRagDoc() {
-  const textarea = document.getElementById('ragInput');
-  if (!textarea) return;
-  const text = textarea.value.trim();
-  if (!text) {
-    setRagStatus('Skriv eller klistra in text först.', 'error');
-    return;
-  }
-  setRagStatus('Lägger till text…');
-  try {
-    const res = await fetch('/api/rag/docs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text })
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.detail || ('HTTP ' + res.status));
-    }
-    textarea.value = '';
-    await fetchRagDocs({ text: 'Texten lades till i kunskapsbasen.', type: 'success' });
-  } catch (e) {
-    setRagStatus('Kunde inte lägga till text: ' + e.message, 'error');
-  }
-}
-
-async function deleteRagDoc(id) {
-  if (!id) return;
-  try {
-    const res = await fetch(`/api/rag/docs/${encodeURIComponent(id)}`, { method: 'DELETE' });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.detail || ('HTTP ' + res.status));
-    }
-    await fetchRagDocs({ text: 'Texten togs bort.', type: 'success' });
-  } catch (e) {
-    setRagStatus('Kunde inte ta bort text: ' + e.message, 'error');
-  }
-}
-
-async function clearRagDocs() {
-  const listEl = document.getElementById('ragList');
-  if (!listEl) return;
-  if (!window.confirm('Är du säker på att du vill tömma kunskapsbasen?')) {
-    return;
-  }
-  try {
-    const res = await fetch('/api/rag/docs', { method: 'DELETE' });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.detail || ('HTTP ' + res.status));
-    }
-    await fetchRagDocs({ text: 'Kunskapsbasen tömdes.', type: 'success' });
-  } catch (e) {
-    setRagStatus('Kunde inte rensa kunskapsbasen: ' + e.message, 'error');
   }
 }
 
@@ -426,17 +323,11 @@ if (ragTopKInput) {
   });
 }
 
-const ragAddBtn = document.getElementById('addRag');
-if (ragAddBtn) ragAddBtn.addEventListener('click', addRagDoc);
-
-const ragClearBtn = document.getElementById('clearRag');
-if (ragClearBtn) ragClearBtn.addEventListener('click', clearRagDocs);
-
 document.getElementById('endpoint').textContent = (window.location.origin + '/api').replace('/api','/');
 renderRagResults([]);
 fetchModels();
 fetchAppInfo();
-fetchRagDocs();
+fetchRagSummary();
 
 
 // --- Whisper inspelning ---

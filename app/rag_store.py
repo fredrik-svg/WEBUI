@@ -111,11 +111,15 @@ class RAGStore:
             for doc in self.documents:
                 raw_text = (doc.get("text") or "").strip().replace("\r\n", " ").replace("\n", " ")
                 preview = raw_text[:160] + ("…" if len(raw_text) > 160 else "")
+                metadata = doc.get("metadata")
+                if not metadata and isinstance(doc.get("meta"), dict):  # backward compatibility
+                    metadata = doc.get("meta")
                 items.append({
                     "id": doc.get("id"),
                     "preview": preview,
                     "chunks": len(doc.get("chunks") or []),
                     "created_at": doc.get("created_at"),
+                    "metadata": metadata or {},
                 })
             return items
 
@@ -135,7 +139,7 @@ class RAGStore:
                 self._save()
             return removed
 
-    async def add_document(self, text: str) -> Dict[str, Any]:
+    async def add_document(self, text: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         cleaned = (text or "").strip()
         if not cleaned:
             raise ValueError("Skriv in text att lägga till i kunskapsbasen.")
@@ -162,6 +166,7 @@ class RAGStore:
             "text": cleaned,
             "chunks": stored_chunks,
             "created_at": created_at,
+            "metadata": metadata or {},
         }
         async with self._lock:
             self.documents.append(new_doc)
@@ -173,6 +178,7 @@ class RAGStore:
             "preview": preview,
             "chunks": len(stored_chunks),
             "created_at": created_at,
+            "metadata": metadata or {},
         }
 
     async def search(self, query: str, top_k: int = 3) -> List[RAGResult]:

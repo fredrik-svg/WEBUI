@@ -41,6 +41,12 @@
             <button id="micBtn" title="Spela in (håll för att prata)">🎤</button>
             <button id="send">Skicka</button>
             <label class="row" style="gap:6px;"><input type="checkbox" id="ttsToggle" checked> Läs upp svar</label>
+            <label class="row tts-select" for="ttsEngine" title="Välj talsyntes">
+              Röst
+              <select id="ttsEngine">
+                <option value="browser">Webbläsare (inbyggd)</option>
+              </select>
+            </label>
             <button id="dlTts" title="Ladda ner ljud av senaste svar">🔊 Ladda ner ljud</button>
           </div>
           <div class="row wrap fine-controls">

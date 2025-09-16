@@ -14,6 +14,33 @@ function setRagStatus(message, type = 'info') {
   if (type === 'success') statusEl.classList.add('success');
 }
 
+function applyEmbeddingStatus(status) {
+  const addTextButton = document.getElementById('addTextBtn');
+  const addUrlButton = document.getElementById('addUrlBtn');
+  const pdfForm = document.getElementById('ragPdfForm');
+  const pdfSubmit = pdfForm ? pdfForm.querySelector('button[type="submit"]') : null;
+  const pdfInput = document.getElementById('ragPdfInput');
+
+  const available = status && typeof status.available !== 'undefined' ? Boolean(status.available) : true;
+  const disableControls = !available;
+
+  [addTextButton, addUrlButton, pdfSubmit].forEach((element) => {
+    if (element) {
+      element.disabled = disableControls;
+    }
+  });
+
+  if (pdfInput) {
+    pdfInput.disabled = disableControls;
+  }
+
+  const message = (status && typeof status.message === 'string') ? status.message : '';
+  return {
+    disableControls,
+    message,
+  };
+}
+
 function describeMetadata(meta) {
   if (!meta || typeof meta !== 'object') return '';
   const parts = [];
@@ -132,13 +159,20 @@ async function fetchRagDocs(statusOverride) {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     const summary = renderRagDocs(data.documents, data.stats);
+    const embedStatus = applyEmbeddingStatus(data.embedding_status);
     if (data && data.embedding_model) {
       const modelEl = document.getElementById('ragModelName');
       if (modelEl) {
         modelEl.textContent = data.embedding_model;
       }
     }
-    if (statusOverride && statusOverride.text) {
+    const embedBlocking = embedStatus.disableControls && embedStatus.message;
+    if (embedBlocking) {
+      const overrideText = (statusOverride && statusOverride.text)
+        ? `${statusOverride.text} ${embedStatus.message}`
+        : embedStatus.message;
+      setRagStatus(overrideText.trim(), 'error');
+    } else if (statusOverride && statusOverride.text) {
       setRagStatus(statusOverride.text, statusOverride.type || 'info');
     } else if (summary.count === 0) {
       setRagStatus('Ingen text har lagts till ännu.');

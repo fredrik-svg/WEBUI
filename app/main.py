@@ -210,10 +210,12 @@ async def list_models():
 async def list_rag_documents():
     docs = await rag_store.list_documents()
     stats = await rag_store.stats()
+    embedding_status = await rag_store.embedding_status()
     return {
         "documents": docs,
         "stats": stats,
         "embedding_model": EMBED_MODEL,
+        "embedding_status": embedding_status,
     }
 
 

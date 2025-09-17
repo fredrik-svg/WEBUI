@@ -5,8 +5,10 @@ set -euo pipefail
 # - Installerar Ollama
 # - Skapar Python-venv och startar appen
 
-if ! command -v curl >/dev/null 2>&1; then
-  sudo apt-get update && sudo apt-get install -y curl ffmpeg
+# Säkerställ att nödvändiga systempaket finns (curl, ffmpeg, eSpeak NG)
+if command -v apt-get >/dev/null 2>&1; then
+  sudo apt-get update
+  sudo apt-get install -y curl ffmpeg espeak-ng
 fi
 
 # Installera Ollama om den saknas

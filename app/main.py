@@ -621,4 +621,12 @@ async def tts(payload: dict):
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"TTS misslyckades: {exc}") from exc
+        message = str(exc)
+        if isinstance(exc, OSError) and "libespeak" in message.lower():
+            hint = (
+                "TTS kräver eSpeak NG-biblioteket. Installera paketet `espeak-ng` "
+                "(som innehåller libespeak-ng1) och försök igen."
+            )
+            raise HTTPException(status_code=500, detail=hint) from exc
+
+        raise HTTPException(status_code=500, detail=f"TTS misslyckades: {message}") from exc

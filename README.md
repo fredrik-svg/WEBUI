@@ -128,6 +128,7 @@ Installationsscriptet installerar `ffmpeg`. Se `.env.example` för konfig.
 - **Whisper** syftar här på eSpeak NG:s viskande röstvariant.
 - **eSpeak NG + MBROLA** använder MBROLA-röster (t.ex. `mb-sv1`) om de finns installerade.
 - Saknas MBROLA-röster visas alternativet som otillgängligt tills du installerat dem.
+- Kör du utanför Docker behöver eSpeak NG finnas i systemet: `sudo apt-get install espeak-ng` (drar automatiskt in `libespeak-ng1`).
 
 ## GitHub-repo
 
